@@ -27,15 +27,17 @@ defmodule Foo.MixProject do
     [
       foo: [
         # include_erts: false
+        otp_version: "25.1",
         steps: [:assemble, &build_launcher/1]
       ]
     ]
   end
 
   defp build_launcher(release) do
+    release = build_otp(release)
+
     tmp_dir = Path.join(release.path, "tmp")
     File.mkdir_p!(tmp_dir)
-
     launcher_cpp_path = Path.join(tmp_dir, "launcher.cpp")
     launcher_bin_path = Path.join([release.path, "bin", "launcher"])
     File.write!(launcher_cpp_path, launcher(release))
@@ -56,6 +58,19 @@ defmodule Foo.MixProject do
     """)
 
     File.rm_rf!(tmp_dir)
+    release
+  end
+
+  defp build_otp(release) do
+    otp_version = Keyword.fetch!(release.options, :otp_version)
+    otp_path = Path.join(Mix.Project.build_path(), "otp-#{otp_version}")
+
+    unless File.exists?(otp_path) do
+      shell!(
+        "git clone --depth 1 https://github.com/erlang/otp --branch OTP-#{otp_version} #{otp_path}"
+      )
+    end
+
     release
   end
 
