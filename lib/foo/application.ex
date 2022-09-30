@@ -5,8 +5,8 @@ defmodule Foo.Application do
 
   @impl true
   def start(_type, _args) do
-    dbg("hello from Elixir!")
-    dbg(System.version())
+    dbg(:erlang.system_info(:system_architecture))
+    System.halt()
     children = []
     opts = [strategy: :one_for_one, name: Foo.Supervisor]
     Supervisor.start_link(children, opts)

@@ -27,15 +27,27 @@ defmodule Foo.MixProject do
     [
       foo: [
         # include_erts: false
-        otp_version: "25.1",
-        steps: [:assemble, &build_launcher/1]
+        targets: [
+          "macos-aarch64",
+          "macos-x86_64",
+          "ios-aarch64",
+          "iossimulator-aarch64",
+          "iossimulator-x86_64"
+        ],
+        bootstrap: [
+          openssl_version: "3.0.5",
+          otp_version: "25.1"
+        ],
+        steps: [
+          :assemble,
+          &bootstrap/1,
+          &build_launcher/1
+        ]
       ]
     ]
   end
 
   defp build_launcher(release) do
-    release = build_otp(release)
-
     tmp_dir = Path.join(release.path, "tmp")
     File.mkdir_p!(tmp_dir)
     launcher_cpp_path = Path.join(tmp_dir, "launcher.cpp")
@@ -61,21 +73,54 @@ defmodule Foo.MixProject do
     release
   end
 
-  defp build_otp(release) do
-    otp_version = Keyword.fetch!(release.options, :otp_version)
-    otp_path = Path.join(Mix.Project.build_path(), "otp-#{otp_version}")
+  defp bootstrap(release) do
+    Enum.reduce(release.options[:targets], release, &bootstrap/2)
+  end
 
-    unless File.exists?(otp_path) do
-      shell!(
-        "git clone --depth 1 https://github.com/erlang/otp --branch OTP-#{otp_version} #{otp_path}"
-      )
-    end
+  defp bootstrap(target, release) do
+    dbg(target)
 
+    release
+    |> build_openssl(target)
+    |> build_otp(target)
+  end
+
+  defp build_openssl(release, target) do
+    version = release.options[:bootstrap][:openssl_version]
+    source_dir = Path.expand("_build/tmp/openssl-#{version}")
+    target_dir = Path.expand("_build/openssl-#{version}-#{target}")
+
+    openssl_target =
+      case target do
+        "macos-aarch64" -> "darwin64-arm64-cc"
+        "macos-x86_64" -> "darwin64-x86_64-cc"
+        "ios-aarch64" -> "ios64-xcrun"
+        "iossimulator-aarch64" <> _ -> "iossimulator-arm64-xcrun"
+        "iossimulator-x86_64" <> _ -> "iossimulator-x86_64-xcrun"
+      end
+
+    shell!("scripts/build_openssl.sh #{version} #{source_dir} #{target_dir} #{openssl_target}")
     release
   end
 
-  defp shell!(cmd) do
-    {_, 0} = System.shell(cmd, into: IO.stream())
+  defp build_otp(release, target) do
+    version = release.options[:bootstrap][:otp_version]
+    openssl_version = release.options[:bootstrap][:openssl_version]
+    source_dir = Path.expand("_build/tmp/otp-#{version}")
+    target_dir = Path.expand("_build/otp-#{version}-#{target}")
+    openssl_dir = Path.expand("_build/openssl-#{openssl_version}-#{target}")
+
+    shell!("""
+    scripts/build_otp.sh \\
+      #{version} \\
+      #{source_dir} \\
+      #{target_dir} \\
+      #{target} \\
+      #{openssl_dir} \\
+      $PWD/scripts/xcomp/#{target}.conf
+    """)
+
+    release
   end
 
   require EEx
@@ -104,12 +149,14 @@ defmodule Foo.MixProject do
           "RELEASE_LIB",
           "<%= Path.join([release.path, "lib"]) %>",
           "-noshell",
-          "-eval",
-          "io:format(\"~s\", [erlang:system_info(system_version)]), halt().",
       };
       erl_start(sizeof(args) / sizeof(args[0]), (char **)args);
   }
   """
 
   EEx.function_from_string(:defp, :launcher, launcher, [:release])
+
+  defp shell!(cmd, opts \\ []) do
+    {_, 0} = System.shell(cmd, [into: IO.stream()] ++ opts)
+  end
 end
