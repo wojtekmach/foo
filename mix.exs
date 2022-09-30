@@ -78,8 +78,6 @@ defmodule Foo.MixProject do
   end
 
   defp bootstrap(target, release) do
-    dbg(target)
-
     release
     |> build_openssl(target)
     |> build_otp(target)
